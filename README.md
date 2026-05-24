@@ -1,3 +1,5 @@
+https://www.youtube.com/watch?v=6CYUNltvXG0
+
 🏆 Inference Collapse: Real-Time Hallucination Audit
 Inference Collapse is a cyberpunk-inspired real-time simulation game that binds Gemma 4 (31B-it) inference outputs directly to downstream world-state physics and behavior.
 
