@@ -1,3 +1,4 @@
+<img width="1329" height="696" alt="スクリーンショット 2026-05-24 095840" src="https://github.com/user-attachments/assets/3b945f77-8cfa-4960-9164-b73e18b8253d" />
 
 [DEMO:youtube][https://www.youtube.com/watch?v=6CYUNltvXG0]
 
