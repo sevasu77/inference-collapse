@@ -1,5 +1,6 @@
 処理の流れ（UI→LLM→Engine→State）
 
+<img width="636" height="658" alt="image" src="https://github.com/user-attachments/assets/f57027f4-8433-4037-9d80-0099041ba0a0" />
 
 <img width="723" height="262" alt="image" src="https://github.com/user-attachments/assets/6b5c0dd6-ac1d-49b1-9342-c42885b35360" />
 
