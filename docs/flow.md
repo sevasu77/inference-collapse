@@ -1,15 +1,8 @@
 処理の流れ（UI→LLM→Engine→State）
 
 
-全体構造
-inference-collapse/
-│
-├── backend/                ← Python側（頭脳・状態・API）
-├── frontend/               ← JSゲームエンジン
-├── ui/                     ← Streamlit（見た目・操作）
-├── shared/                ← 共通データ・型
-├── docs/                  ← 設計図・説明
-└── README.md
+<img width="723" height="262" alt="image" src="https://github.com/user-attachments/assets/6b5c0dd6-ac1d-49b1-9342-c42885b35360" />
+
 <img width="597" height="177" alt="image" src="https://github.com/user-attachments/assets/3456ff15-d81e-495b-bd70-f3e35799e8f5" />
 
 
