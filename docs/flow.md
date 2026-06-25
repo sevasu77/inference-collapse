@@ -1,6 +1,9 @@
 処理の流れ（UI→LLM→Engine→State）
 
 <img width="636" height="658" alt="image" src="https://github.com/user-attachments/assets/f57027f4-8433-4037-9d80-0099041ba0a0" />
+
+
+
 🧠 ① LLM層（頭脳）
 📦 役割
 
