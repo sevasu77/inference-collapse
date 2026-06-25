@@ -19,3 +19,12 @@
         [Game Engine]
                ↓
         frontend描画
+
+
+| 今のコード                      | 新構造              |
+| -------------------------- | ---------------- |
+| ask_gemma_reasoning        | backend/services |
+| recalculateWorldThreat     | backend/engine   |
+| auditStates                | backend/state    |
+| collectors / update / draw | frontend/engine  |
+| Streamlit + HTML           | ui/app.py        |
