@@ -25,19 +25,17 @@
 │  STATE   │ │   GAME   │ │    UI    │
 └──────────┘ └──────────┘ └──────────┘
 
-# 🧠 ① LLM層（頭脳）
+🧩 各コンポーネントの定義
+🧠 ① LLM層（頭脳）
+役割： 「推理・判断を作るAI」 ➔ 👉「探偵AI」
 
-* **役割：** 「推理・判断を作るAI」 ➔ **👉「探偵AI」**
-* **該当コード：** `ask_gemma_reasoning()`
-* **データ構造：**
-  * **入力 (Input):**
-    * `sector` (BIO / MEC / CYB)
-    * `evidence` (証拠)
-  * **出力 (Output):**
-    * `report` (推理)
-    * `confidence` (確信度)
-    * `severity` (危険度)
-    * `contradiction` (矛盾)
+該当コード： ask_gemma_reasoning()
+
+データ構造：
+
+入力: sector (BIO / MEC / CYB), evidence (証拠)
+
+出力: report (推理), confidence (確信度), severity (危険度), contradiction (矛盾)
 
 ---
 
