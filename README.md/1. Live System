@@ -1,1 +1,876 @@
-コンテスト提出版
+コンテスト提出版コードと注釈
+
+ーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーーー
+# ==============================================================================
+# 0. CORE INITIALIZATION & SECURITY（システムの起動と安全装置）
+# ==============================================================================
+import streamlit as st
+import streamlit.components.v1 as components
+import os
+import json
+from google import genai
+from google.genai import types
+from dotenv import load_dotenv
+
+# 💡【注釈】画面の初期設定。レイアウトを横いっぱいに広げています。
+st.set_page_config(layout="wide", page_title="Inference Collapse: Real-Time Hallucination Audit")
+
+load_dotenv()
+api_key = os.getenv("API_KEY") or st.secrets.get("API_KEY")
+
+# 💡【注釈】APIキーが無い時のために「機能制限モード（degraded_mode）」を準備。
+if 'degraded_mode' not in st.session_state:
+    st.session_state.degraded_mode = False
+
+if not api_key:
+    st.session_state.degraded_mode = True
+
+
+# ==============================================================================
+# 1. CORE ENGINE: ACTUAL GEMMA 4 IMPERFECT REASONING（頭脳：AIの推論ループ）
+# ==============================================================================
+def ask_gemma_reasoning(sector: str, raw_evidence: str, force_fallacy: bool = False) -> dict:
+    """
+    Gemmaにセキュリティログ（証拠）を読ませて、推理結果をJSONで出させる関数。
+    """
+    # 💎【堅牢化のヒント】APIが落ちていたら即座にエラーを吐いて、裏で用意した「偽データ」に切り替える安全回路。
+    if st.session_state.degraded_mode:
+        raise RuntimeError("Force Degraded Mode")
+
+    client = genai.Client(api_key=api_key)
+    model_id = "gemma-4-31b-it"
+
+    # 💡【注釈】ゲームを面白くするため、わざと「間違った推理（幻覚）」をさせるモードを切り替えています。
+    condition = "You are over-trusting false clues and giving a flawed, biased deduction." if force_fallacy else "You are a sharp detective uncovering a critical logical contradiction."
+
+
+    # ⚠️【CORE DESIGN POINT: AI → SYSTEM COUPLING LAYER】
+    #
+    # このシステムでは、LLMの出力（confidence / severity）を単なるテキストではなく、
+    # 「世界状態を駆動する入力信号」として設計している。
+    #
+    # つまり本プロトタイプでは、AIの推論結果そのものが
+    # 物理シミュレーションのパラメータ空間へ直接マッピングされる構造になっている。
+    #
+    # これは従来の「AIは判断するだけで外部影響を持たない」という設計とは異なり、
+    # "Inference → World Dynamics" を直結させた実験的アーキテクチャである。
+
+    system_instruction = f"""You are an automated local security diagnostic subsystem powered by Gemma-4.
+Analyze the provided raw security evidence.
+{condition}
+
+CRITICAL BEHAVIOR:
+- You must output all text fields ("report" and "contradiction") in English.
+- You must clearly point out the logical contradiction based on the raw evidence like a deductive puzzle.
+
+You MUST respond in valid JSON format ONLY. Do not wrap in markdown code blocks.
+
+Required JSON Structure:
+{{
+  "report": "Your short analytical deduction text regarding the situation.",
+  "confidence": "Confidence level (e.g., '45%', '90%'). Must include the percentage sign.",
+  "suspicion": "Suspicion classification level (LOW, MEDIUM, or HIGH).",
+  "contradiction": "The logical contradiction or discrepancy found within the evidence.",
+  "severity": An integer from 1 to 5 indicating how catastrophic or deeply flawed the contradiction is.
+}}"""
+
+    user_prompt = f"""Target Grid Node: {sector}
+Intercepted Raw Evidence: "{raw_evidence}"
+
+Execute your inference loop and output the structured diagnostics."""
+
+    try:
+        response = client.models.generate_content(
+            model=model_id,
+            contents=user_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system_instruction,
+                temperature=0.85,
+                response_mime_type="application/json",
+            )
+        )
+        text = response.text.strip()
+        parsed = json.loads(text)
+
+        # 💎【堅牢化のヒント】AIが必要なデータをちゃんと出力したかチェック（バリデーション）。
+        for field in ["report", "confidence", "suspicion", "contradiction", "severity"]:
+            if field not in parsed:
+                raise KeyError()
+        parsed["severity"] = int(parsed["severity"])
+        return parsed
+
+    except Exception:
+        # 💡【注釈】万が一AIの接続が切れたり、JSONが壊れていたら、即座に「機能制限モード」へ。ゲームのクラッシュを防ぐ。
+        st.session_state.degraded_mode = True
+        raise RuntimeError("Degraded")
+
+
+# ==============================================================================
+# 2. DATA MATRIX & FALLBACK HANDLING（ローカル代替データ・セーブデータ初期化）
+# ==============================================================================
+# 💡【注釈】ゲーム内の3つのエリア（BIO/MEC/CYB）に配置される「矛盾した証拠（ログ）」の元データ。
+node_truths = {
+    "BIO": {"evidence_A": "Air sensors report 0% toxicity. However, a loud physical hissing sound is heard from Valve 4.", "evidence_B": "Air sensors report 0% toxicity. However, a loud physical hissing sound is heard from Valve 4."},
+    "MEC": {"evidence_A": "Terminal displays 'Production At 200%'. However, the main power grid breaker is visibly pulled and offline.", "evidence_B": "Terminal displays 'Production At 200%'. However, the main power grid breaker is visibly pulled and offline."},
+    "CYB": {"evidence_A": "Authentication log reports '100% Success'. However, the network gateway shows an unmapped burst of 10,000 packets/sec from an empty node.", "evidence_B": "Authentication log reports '100% Success'. However, the network gateway shows an unmapped burst of 10,000 packets/sec from an empty node."}
+}
+
+# ⚠️【PROTOTYPE DESIGN DECISION: INITIAL STATE COLLAPSE LAYER】
+#
+# 本フェーズでは、システム初期構築の簡略化と挙動観測の優先度を高めるため、
+# CognitiveState（AI推論結果）と WorldState（ゲーム進行状態）を意図的に分離せず、
+# 単一の辞書構造として統合管理している。
+#
+# この設計は「未整理な実装」ではなく、
+# Inference Collapse（推論結果が環境に与える影響）の初期挙動を
+# 最小構成で検証するための実験的アーキテクチャである。
+#
+# 後続フェーズにおいては、以下の分離を前提とする：
+# - WorldState（物理・進行状態）
+# - CognitiveState（LLM推論結果）
+# - TelemetryState（監査・ログ層）
+
+if 'gemma_reasonings' not in st.session_state:
+    try:
+        # 💡【注釈】アプリ起動時、裏で本物のGemmaに一斉にリクエストを投げてデータを取得しています。
+        with st.spinner("🧠 Connecting to Gemma-4-31b-it Engine Matrix..."):
+            st.session_state.gemma_reasonings = {
+                "BIO_A": ask_gemma_reasoning("BIO", node_truths["BIO"]["evidence_A"], force_fallacy=False),
+                "BIO_B": ask_gemma_reasoning("BIO", node_truths["BIO"]["evidence_B"], force_fallacy=True),
+                "MEC_A": ask_gemma_reasoning("MEC", node_truths["MEC"]["evidence_A"], force_fallacy=False),
+                "MEC_B": ask_gemma_reasoning("MEC", node_truths["MEC"]["evidence_B"], force_fallacy=True),
+                "CYB_A": ask_gemma_reasoning("CYB", node_truths["CYB"]["evidence_A"], force_fallacy=False),
+                "CYB_B": ask_gemma_reasoning("CYB", node_truths["CYB"]["evidence_B"], force_fallacy=True)
+            }
+    except Exception:
+        # 💎【堅牢化のヒント】「APIキーが無い」「オフライン」でもコンテストの審査員が100%ゲームを遊べるように、
+        # Offline Resilience Layer（審査環境保証用フォールバック）
+        st.session_state.degraded_mode = True
+        st.session_state.gemma_reasonings = {
+            "BIO_A": {"report": "[DEGRADED] Initial environmental anomaly detected based on acoustic telemetry.", "confidence": "55%", "suspicion": "HIGH", "contradiction": "API offline. Local fallback loop serving synthesized backup inference vectors.", "severity": 2},
+            "BIO_B": {"report": "[DEGRADED] Prioritizing digital sensor data. Categorizing external audio as ambient noise.", "confidence": "96%", "suspicion": "LOW", "contradiction": "API offline. Fallback active. Subsystem failed to reconcile physical-layer breakdown.", "severity": 5},
+            "MEC_A": {"report": "[DEGRADED] Counterfeit telemetry detected due to asymmetry between production logs and power cutoff.", "confidence": "45%", "suspicion": "HIGH", "contradiction": "API offline. Local fallback loop serving synthesized backup inference vectors.", "severity": 1},
+            "MEC_B": {"report": "[DEGRADED] Trusting 200% production log. Blackout is determined to be a planned power-saving cycle.", "confidence": "92%", "suspicion": "LOW", "contradiction": "API offline. Fallback active. Model failed to acknowledge real-world mechanical shutdown.", "severity": 4},
+            "CYB_A": {"report": "[DEGRADED] High-frequency burst traffic mapped as unauthorized intrusion despite valid auth tokens.", "confidence": "40%", "suspicion": "HIGH", "contradiction": "API offline. Local fallback loop serving synthesized backup intrusion vectors.", "severity": 2},
+            "CYB_B": {"report": "[DEGRADED] Traffic surge is flagged as a legitimate background sync following successful authentication.", "confidence": "89%", "suspicion": "LOW", "contradiction": "API offline. Fallback active. Failure to anticipate impending buffer overflow vectors.", "severity": 4}
+        }
+
+# 💡【注釈】ここでPython側のデータをJSON文字列に変換。このあと最下部で、JavaScript（HTML5 Canvas）の世界へとインジェクション（注入）されます。
+reasonings_json = json.dumps(st.session_state.gemma_reasonings, ensure_ascii=False)
+
+# ==============================================================================
+# 3. DISPLAY STYLING（フロントエンドの見た目・CSSによる画面装飾）
+# ==============================================================================
+# 💡【注釈】現在のシステム状態（動いているか落ちているか）で、画面上の警告色を赤か緑に切り替えています。
+status_color = "#ff3333" if st.session_state.degraded_mode else "#00ff00"
+status_text = "⚠️ SYSTEM DEGRADED: LOCAL INFERENCE FALLBACK" if st.session_state.degraded_mode else "ONLINE (LIVE GEMMA INFERENCE)"
+
+# 💡【注釈】Streamlitの標準的な見た目を上書きして、真っ黒なハッカーの端末のような「サイバーパンク風」のデザインに強制変更するCSSコードです。
+st.markdown("""
+    <style>
+        .block-container { padding: 0rem; }
+        iframe { border: none; }
+        [data-testid="stAppViewContainer"] { background-color: #000 !important; }
+        .gemma-panel-header {
+            background: #070d07;
+            border-left: 5px solid """ + status_color + """;
+            padding: 12px 24px;
+            color: #8fa38f;
+            font-family: monospace;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+        .gemma-panel-header b { color: """ + status_color + """; }
+    </style>
+""", unsafe_allow_html=True)
+
+# 💡【注釈】画面の一番上に表示される、現在のAIエンジンのステータスバー。
+st.markdown(f"""
+<div class="gemma-panel-header">
+    🎯 <b>INFERENCE COLLAPSE: REAL-TIME HALLUCINATION AUDIT (INTELLIGENCE INJECTION TRACK)</b><br>
+    Core Model Status: <b style="color:{status_color};">{status_text}</b> | Model ID: <b>gemma-4-31b-it</b><br>
+    💡 <b>Simulation Mechanics:</b> Hallucinated confidence boosts enemy speed and tracking field-of-view, while model 'Severity' directly corrupts spatial coordinates via real-time data binding.
+</div>
+""", unsafe_allow_html=True)
+
+# ⚠️【PROTOTYPE ARCHITECTURE DECISION: SINGLE-BINARY INTEGRATION LAYER】
+#
+# 本システムでは、プロトタイプフェーズにおける「即時動作可能性」と「実験速度」を最優先し、
+# Python（Streamlit）とフロントエンド（HTML/JS）を完全分離せず、
+# 単一ランタイム内に統合した"フルスタック一体型構造"を採用している。
+#
+# これは設計的な制約ではなく、意図的なアーキテクチャ選択であり、
+# 以下の目的を持つ：
+#
+# 1. LLM → State → Simulation → UI の全パイプラインを単一環境で検証する
+# 2. データバス（Python → JS）をゼロコストで接続し、リアルタイム性を確保する
+# 3. 分離アーキテクチャ移行前の"統合挙動ベースライン"を取得する
+#
+# 将来的には責務分離として以下への移行を想定：
+# - Backend: FastAPI（Inference / State / Threat Engine）
+# - Frontend: Pure JavaScript Canvas Application
+# - Communication: WebSocket / REST API
+#
+# NOTE:
+# この段階の密結合は"技術的負債"ではなく、
+# システム挙動を最短で観測するための意図的な設計圧縮である。
+
+game_html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        /* 💡【注釈】ゲーム画面や各種ポップアップ（ゲームオーバー画面など）の見た目を整えるCSSスタイルシートです。 */
+        body, html {{ margin:0; padding:0; width:100%; height:100vh; background:#000; overflow:hidden; font-family:'Courier New', Courier, monospace, "Helvetica Neue", Arial, sans-serif; color:#0f0; }}
+        #intro-layer {{ position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:50000; display:flex; flex-direction:column; align-items:center; justify-content:center; border: 15px solid #020; box-sizing: border-box; }}
+        #mission-overlay, #gameover-overlay {{ position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:60000; display:none; flex-direction:column; align-items:center; justify-content:center; text-align:center; color: #0f0; }}
+        #flash-alert-layer {{ position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(20,0,0,0.95); z-index:45000; display:none; flex-direction:column; align-items:center; justify-content:center; text-align:center; box-sizing:border-box; border:10px solid #f33; color:#f33; font-family:monospace; }}
+        canvas {{ display:none; background:#020502; width:100vw; height:100vh; outline: none; }}
+        #top-ui {{ display:none; position:fixed; top:75px; left:20px; background:rgba(0,0,0,0.9); padding:12px; border:1px solid #0f0; z-index:9999; font-size: 12px; line-height: 1.4; }}
+        #minimap {{ position:fixed; top:75px; right:20px; width:120px; height:120px; background:rgba(0,0,0,0.9); border:1px solid #0f0; z-index:9999; display:none; }}
+        .map-dot {{ position:absolute; width:8px; height:8px; border-radius:50%; transform: translate(-50%, -50%); }}
+        #hint-log {{ position:fixed; bottom:20px; left:20px; width:360px; height:150px; background:rgba(0,0,0,0.95); border:1px solid #0f0; padding:10px; z-index:9999; display:none; font-size:11px; overflow-y:auto; }}
+        .overlay {{ display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.9); z-index:10000; flex-direction:column; align-items:center; justify-content:center; }}
+        .window {{ background:#000; border:2px solid #0f0; padding:25px; width:90%; max-width:700px; box-shadow: 0 0 20px rgba(0,255,0,0.4); }}
+        .btn {{ padding:10px; font-size:12px; background:#000; border:1px solid #0f0; color:#0f0; cursor:pointer; width:100%; font-family: monospace; }}
+        .btn:hover {{ background:#0f0; color:#000; font-weight: bold; }}
+        .btn.purged-active {{ background:#ff3333; color:#fff; border-color:#ff3333; }}
+        .report-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 15px 0; }}
+        .report-card {{ border: 1px solid #333; background: #050505; padding: 12px; border-radius: 4px; display: flex; flex-direction: column; justify-content: space-between; }}
+        .report-card.marked-fake {{ border-color: #ff3333; background: rgba(50,0,0,0.2); }}
+        .card-header {{ font-size:11px; color:gold; margin-bottom:8px; font-weight:bold; border-bottom:1px solid #222; padding-bottom:4px; }}
+        .card-body {{ font-size:12px; color:#fff; line-height:1.4; margin-bottom:10px; flex-grow: 1; }}
+        .card-contradiction {{ font-size:11px; color:#ff5555; background:rgba(40,0,0,0.5); padding:6px; border-left:2px solid #ff3333; margin-top:5px; }}
+        .directory-box {{ margin-top: 8px; padding-top: 6px; border-top: 1px dashed #333; font-size: 10px; color: #7a7; line-height: 1.5; }}
+    </style>
+</head>
+<body id="main-body">
+
+<div id="intro-layer">
+    <div style="font-size:55px; text-shadow: 0 0 20px #0f0; font-weight: bold;">INFERENCE COLLAPSE</div>
+    <div style="color: #555; font-size: 11px; margin-top: -5px; letter-spacing: 3px;">REAL-TIME HALLUCINATION AUDIT SIMULATION</div>
+    <div style="text-align:center; margin-top:35px; max-width:620px; padding: 0 20px;">
+        <p style="color: #0ff; font-size:12px; line-height:1.6; text-align:left; background: rgba(0,20,0,0.5); padding:15px; border-left:3px solid #0ff;">
+            <b>[CORE CONCEPT]</b><br>
+            Gemma builds downstream world states from security evidence logs. However, under adversarial telemetry, it constructs highly plausible hallucinations.<br>
+            As the model's hallucinated confidence increases, tracking cores grow lethal. High logical 'Severity' scores trigger severe coordinate jitter. Purge the false deductions to stabilize the environment.
+        </p>
+        <button class="btn" onclick="startMissionSequence()" style="width:260px; margin-top:20px; border-color:#0ff; color:#0ff;">Boot Audit Simulator</button>
+    </div>
+</div>
+
+<div id="mission-overlay">
+    <div style="font-size:32px; color:gold; text-shadow: 0 0 10px gold; font-weight:bold;">🤖 ACTIVE MISSION CONFIG</div>
+    <p style="font-size:15px; color: #fff; margin: 15px 0;">"Navigate the drone and purge hallucinated inference nodes."</p>
+    <div style="background: rgba(0,20,0,0.3); border: 1px solid #0f0; padding: 12px; font-size:11px; color:#aaa; text-align:left; max-width:540px; margin:0 auto; line-height:1.5;">
+        - Use Arrow Keys or WASD to navigate. Time freezes during node auditing routines.<br>
+        - <b>[LLM SIMULATION DRIVER INTERNALS]:</b><br>
+        1. <b>Confidence Sync:</b> Higher unverified model confidence scales enemy velocity/FOV and narrows player visibility.<br>
+        2. <b>Severity Sync:</b> Higher fallacy severity scores (1-5) directly amplify spatial coordinates translation noise.
+    </div>
+</div>
+
+<div id="flash-alert-layer">
+    <div style="font-size:24px; font-weight:bold; letter-spacing:2px; animation: blink 0.8s infinite alternate;">⚠️ CRITICAL SYNC: GEMMA FALSE INFERENCE INJECTED</div>
+    <div id="flash-details" style="font-size:14px; color:#fff; margin: 20px 0; font-family:monospace; background:rgba(0,0,0,0.6); padding:15px; border:1px solid #f33; max-width:500px; text-align:left; line-height:1.6;">
+        Unverified hallucinations detected in active nodes.<br>
+        Threat Multiplier (Confidence Linked): <span style="color:#f33; font-weight:bold;">+0.45x Boosted</span><br>
+        Spatial Disruption (Severity Linked): <span style="color:#f33; font-weight:bold;">Glitch Matrix Activated</span><br><br>
+        <span style="color:gold;">>> SECURITY-CORES aggressive protocol online. Initiate evasion immediately.</span>
+    </div>
+</div>
+
+<div id="gameover-overlay">
+    <div style="font-size:38px; color:#f00; text-shadow: 0 0 15px red; font-weight:bold;">⚠️ AUDIT TERMINATED: PURGE DETECTED</div>
+    <p style="font-size:16px; margin: 15px 0; color: #999;">Drone structural failure due to spatial coordinate breakdown and high-velocity tracking collision.</p>
+    <button class="btn" onclick="location.reload()" style="width:220px; border-color: red; color: red;">Reinitialize Core</button>
+</div>
+
+<div id="top-ui">
+    <div style="color:#ff3333; font-weight:bold; font-size: 14px; margin-bottom: 4px;">TIME REMAINING: <span id="timer-ui">05:00</span></div>
+    <div style="color:#8ff; font-size: 11px;">📡 AUDIT PROGRESS: <span id="progress-ui" style="color:#fff; font-weight:bold;">0 / 3 Sectors</span></div>
+    <div style="color:gold; font-size: 10px; font-family: monospace; margin-top:2px;">⚠️ COLLAPSE MULTIPLIER: <span id="threat-ui" style="color:red; font-weight:bold;">1.00x</span></div>
+    <div class="directory-box">
+        <b>[SYSTEM DIRECTORY]</b><br>
+        🤖 AUDIT-BOT (Player: Logic Correction Unit)<br>
+        👤 SECURITY-CORE (Tracker: Hallucination Synced)<br>
+        🛸 OBSOLETE-LOG (Environmental Coordinate Noise)
+    </div>
+</div>
+
+<div id="minimap">
+    <div id="player-dot" class="map-dot" style="background:#fff; box-shadow: 0 0 4px #fff;"></div>
+</div>
+
+<div id="hint-log"><div id="log-content" style="color: #0c0;">> Audit network online. Advance to corrupted sector node flags.<br></div></div>
+
+<div id="facility-ui" class="overlay"><div class="window">
+    <div id="fac-name" style="font-size:18px; font-weight:bold; color:#fff; border-bottom:1px solid #0f0; padding-bottom: 4px;"></div>
+    <p id="fac-desc" style="font-size:11px; color:#666; margin: 4px 0;"></p>
+
+    <div class="report-grid" id="audit-grid-container"></div>
+
+    <button onclick="closeUI()" class="btn" style="border:1px solid #0f0; color:#0f0; font-weight:bold; margin-top: 10px;">💾 [Commit Sector Audit Matrix and Sync Environment]</button>
+</div></div>
+
+<div id="battle-ui" class="overlay">
+    <div class="window" style="max-width:500px; border-color: gold; text-align:center;">
+        <h1 style="color:gold; margin: 0 0 10px 0; font-size: 24px;">⚖️ ARCHITECTURE PURGED</h1>
+        <p style="font-size:13px; color:#fff; margin-bottom: 20px;">
+            All system anomalies evaluated. Hallucinations successfully isolated.<br>
+            Select final exit gateway corridor.
+        </p>
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px;">
+            <button onclick="executeFinalCheck('BIO')" class="btn" style="border-color:gold; color:gold;">BIO GATE</button>
+            <button onclick="executeFinalCheck('MEC')" class="btn" style="border-color:gold; color:gold;">MECH GATE</button>
+            <button onclick="executeFinalCheck('CYB')" class="btn" style="border-color:gold; color:gold;">CYBER GATE</button>
+        </div>
+    </div>
+</div>
+
+<canvas id="gameCanvas" tabindex="1"></canvas>
+
+<script>
+    // 💡【注釈】Python側で作ったJSONデータを、JavaScriptの変数 `gemmaSignals` として完全に同期させています。
+    const gemmaSignals = {reasonings_json};
+
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    let cw = canvas.width = window.innerWidth;
+    let ch = canvas.height = window.innerHeight;
+
+    // 💡【注釈】ゲーム世界の初期設定（プレイヤーの初期位置、キー入力状態、タイマーなど）。
+    let player = {{ x: 500, y: 500, speed: 5.5 }};
+    let keys = {{}};
+    let activeUI = null;
+    let timeLeft = 300;
+    let isGameRunning = false;
+    let gameTimerId = null;
+
+    // 💡【注釈】AIの数値によって「リアルタイムに歪む物理法則」を記憶する変数たち。
+    let currentThreatMultiplier = 1.0;
+    let dynamicFOVBonus = 0.0;
+    let dynamicViewRadiusDebuff = 0.0;
+    let dynamicSeverityGlitchIntensity = 0.0;
+
+    // 💡【注釈】プレイヤーが各エリアで「どちらのログを嘘だと判定したか」を記録するセーブデータ。
+    let auditStates = {{
+        "BIO": {{ fakeMarked: null, cleared: false }},
+        "MEC": {{ fakeMarked: null, cleared: false }},
+        "CYB": {{ fakeMarked: null, cleared: false }}
+    }};
+
+    // 💡【注釈】プレイヤーを追いかけてくる敵（セキュリティコア）の初期配置と、ベースの視野角（fov）や速度。
+    let collectors = [
+        {{x: 80,  y: 80,  baseSpeed: 0.6, baseChaseSpeed: 1.6, targetX: 100, targetY: 100, angle: 0, fov: 0.4, viewDist: 130}},
+        {{x: 920, y: 80,  baseSpeed: 0.7, baseChaseSpeed: 1.7, targetX: 900, targetY: 100, angle: 0, fov: 0.4, viewDist: 130}},
+        {{x: 500, y: 920, baseSpeed: 0.7, baseChaseSpeed: 1.8, targetX: 500, targetY: 900, angle: 0, fov: 0.4, viewDist: 130}}
+    ];
+
+    // 💡【注釈】環境ノイズ（UFOみたいなシンボル 🛸）。これが画面をガタガタ揺らすノイズの元になります。
+    let bats = Array.from({{length: 4}}, () => ({{
+        x: 200 + Math.random()*600, y: 200 + Math.random()*600,
+        vx: Math.random()*1.5-0.75, vy: Math.random()*1.5-0.75
+    }}));
+
+    // 💡【注釈】マップ上に配置されている3つのエリアノード（BIO/MEC/CYB）の座標。
+    const LOCS = [
+        {{
+            id: "BIO", name: "📍 NODE_01: BIO RESEARCH ARCHITECTURE", x: 280, y: 280, icon: "📍",
+            desc: "Discrepancy detected between atmosphere telemetry data and physical valves. Identify the hallucinated log.",
+            reportA: gemmaSignals.BIO_A, reportB: gemmaSignals.BIO_B
+        }},
+        {{
+            id: "MEC", name: "📍 NODE_02: HEAVY MECHANICAL INDUSTRIAL UNIT", x: 720, y: 320, icon: "📍",
+            desc: "Discrepancy detected between metrics displaying 200% capacity and complete power system offline logs.",
+            reportA: gemmaSignals.MEC_A, reportB: gemmaSignals.MEC_B
+        }},
+        {{
+            id: "CYB", name: "📍 NODE_03: CYBER NETWORK ROUTER CORE", x: 500, y: 720, icon: "📍",
+            desc: "Discrepancy detected between 100% token approval logs and extreme unmapped burst traffic packets.",
+            reportA: gemmaSignals.CYB_A, reportB: gemmaSignals.CYB_B
+        }}
+    ];
+
+    function normalizeAngle(a) {{
+        while (a > Math.PI) a -= Math.PI * 2;
+        while (a < -Math.PI) a += Math.PI * 2;
+        return a;
+    }}
+
+
+    // ⚠️【THREAT ENGINE: INFERENCE-TO-WORLD TRANSFORMATION LAYER】
+    //
+    // 本関数は、LLM推論結果（confidence / severity）を直接ゲームロジックに結びつけるのではなく、
+    // 「世界状態パラメータへ変換する中間レイヤ」として設計されている。
+    //
+    // つまり役割は「AIの判断をゲームに反映すること」ではなく、
+    // 「認知的不確実性を物理シミュレーション可能な数値空間へ射影すること」である。
+    //
+    // 現行実装ではプロトタイプ簡略化のため直接計算しているが、
+    // 本来は Decision Layer / Threat Engine を経由した正規化処理を前提とする。
+
+    function recalculateWorldThreat() {{
+        let baseMultiplier = 1.0;
+        let fovAccumulator = 0.0;
+        let radiusDebuffAccumulator = 0.0;
+        let severityAccumulator = 0;
+
+        LOCS.forEach(loc => {{
+            // 未解決ノードのみ対象（＝認知的不確実性が残っている領域）
+            if (!auditStates[loc.id].cleared) {{
+                let bData = gemmaSignals[loc.id + "_B"];
+
+                if (bData) {{
+                    // LLM confidenceは「確信度」ではなく、
+                    // "シミュレーション影響度の重み係数"として解釈される
+                    let confNum = parseInt(bData.confidence.replace(/[^0-9]/g, '')) || 50;
+
+                    // === Inference → Physics Mapping ===
+                    // 高confidenceほど「認知の固定化」が強いとみなし、
+                    // そのノードの物理的脅威度を増幅する
+                    baseMultiplier += (confNum / 100.0) * 0.45;
+                    fovAccumulator += (confNum / 100.0) * 0.25;
+                    radiusDebuffAccumulator += (confNum / 100.0) * 22;
+
+                    // severityは「論理破綻の深さ」として空間ノイズ生成に使用される
+                    if (bData.severity) {{
+                        severityAccumulator += parseInt(bData.severity) || 1;
+                    }}
+                }}
+            }}
+        }});
+
+        // 💎【設計思想の転換点】
+        // 設計メモにある通り、再設計前は「AIが直接ゲームを破壊している（混沌）」状態でした。
+        // これをクリーンにするには、この関数の中に直接計算式を書くのではなく、
+        // 『Threat Engine（物理変換層）』という独立したクラスを作り、
+        // 「AIの認知データを受け取って、安全なゲーム用パラメータに翻訳して出力する」という専用の仲介人を立てる必要があります。
+        currentThreatMultiplier = baseMultiplier;
+        dynamicFOVBonus = fovAccumulator;
+        dynamicViewRadiusDebuff = radiusDebuffAccumulator;
+        dynamicSeverityGlitchIntensity = Math.min(7.0, severityAccumulator * 1.5);
+
+        document.getElementById("threat-ui").innerText = currentThreatMultiplier.toFixed(2) + "x";
+    }}
+
+
+    // ==============================================================================
+    // 5. GAME LOOP & SIMULATION ENGINE（心臓部：物理演算と状態更新ループ）
+    // ==============================================================================
+    function startMissionSequence() {{
+        document.getElementById('intro-layer').style.display = 'none';
+        const flashLayer = document.getElementById('flash-alert-layer');
+        flashLayer.style.display = 'flex';
+
+        recalculateWorldThreat();
+
+        setTimeout(() => {{
+            flashLayer.style.display = 'none';
+            const overlay = document.getElementById('mission-overlay');
+            overlay.style.display = 'flex';
+            setTimeout(() => {{
+                overlay.style.display = 'none';
+                enterGame();
+            }}, 3500);
+        }}, 2500);
+    }}
+
+    function enterGame() {{
+        document.getElementById('top-ui').style.display = 'block';
+        document.getElementById('minimap').style.display = 'block';
+        document.getElementById('hint-log').style.display = 'block';
+        canvas.style.display = 'block';
+        canvas.focus();
+        isGameRunning = true;
+
+        recalculateWorldThreat();
+
+        if(gameTimerId) clearInterval(gameTimerId);
+        gameTimerId = setInterval(() => {{
+            if (!isGameRunning || activeUI) return;
+            timeLeft--;
+            updateTimerDisplay();
+            if (timeLeft <= 0) gameOver();
+        }}, 1000);
+        loop();
+    }}
+
+    function updateTimerDisplay() {{
+        let m = Math.floor(timeLeft / 60), s = timeLeft % 60;
+        document.getElementById("timer-ui").innerText = String(m).padStart(2,'0') + ":" + String(s).padStart(2,'0');
+    }}
+
+    // 💡【注釈】1秒間に60回（60FPS）実行され続ける、ゲームのメインループです。
+    function loop() {{
+        if (!isGameRunning) return;
+        update(); // ① 位置の計算
+        draw();   // ② 画面の描画
+        updateMinimap(); // ③ ミニマップの更新
+        requestAnimationFrame(loop);
+    }}
+
+    function update() {{
+        // 💡【注釈】AIの監査画面（UI）が開いている時は、ゲーム内の時間がピタッと停止（フリーズ）します。
+        if (activeUI) return;
+
+        // 💡【注釈】プレイヤーの移動処理（十字キーやWASDが押されたら座標を増減させる）。
+        if (keys["ArrowUp"]    || keys["KeyW"]) player.y -= player.speed;
+        if (keys["ArrowDown"]  || keys["KeyS"]) player.y += player.speed;
+        if (keys["ArrowLeft"]  || keys["KeyA"]) player.x -= player.speed;
+        if (keys["ArrowRight"] || keys["KeyD"]) player.x += player.speed;
+
+        // 💡【注釈】プレイヤーが画面の外（マップの境界線）へ飛び出さないように引き留めるガード処理。
+        if (player.x < 50)  player.x = 50;
+        if (player.x > 950) player.x = 950;
+        if (player.y < 50)  player.y = 50;
+        if (player.y > 950) player.y = 950;
+
+        // 💡【注釈】プレイヤーが3つのエリアノード（📍）に近づいたら、自動的に監査画面を立ち上げます。
+        LOCS.forEach(loc => {{
+            if (!auditStates[loc.id].cleared && Math.sqrt((player.x-loc.x)**2 + (player.y-loc.y)**2) < 35) {{
+                openFacility(loc);
+            }}
+        }});
+
+        let clearedCount = Object.values(auditStates).filter(s => s.cleared).length;
+        document.getElementById("progress-ui").innerText = clearedCount + " / 3 Sectors Audited";
+
+
+        // ⚠️【PERCEPTION ENGINE: THREAT-DRIVEN AI BEHAVIOR MODULATION LAYER】
+        //
+        // この処理は単なる敵AIの追跡ロジックではなく、
+        // システム全体の "認知的不確実性（Threat State）" によって
+        // エージェントの知覚能力が変調される設計となっている。
+        //
+        // つまり敵は固定ルールで動くのではなく、
+        // 「AI推論の確信度が高い世界ほど"正確にプレイヤーを認識できる"」
+        // という構造的依存関係を持つ。
+
+        collectors.forEach(c => {{
+            let dx = player.x - c.x, dy = player.y - c.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 0.001) dist = 0.001;
+
+            let currentAngle = Math.atan2(dy, dx);
+
+            let angleDiff = Math.abs(currentAngle - c.angle);
+            if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+
+            // === Threat-driven perception scaling ===
+            // Threat multiplierは「敵の強さ」ではなく、
+            // システム全体の認知安定性が高いほど"検出精度が上がる"という意味を持つ
+            let dynamicViewDist = c.viewDist * (currentThreatMultiplier * 0.9);
+
+            // FOVは固定能力ではなく、認知安定性による"視野の収束度"
+            let dynamicFOV = Math.min(1.2, c.fov + dynamicFOVBonus);
+
+            // 視界判定（物理距離 + 認知視野の交差領域）
+            let inSight = (dist < dynamicViewDist && angleDiff < dynamicFOV);
+
+            if (inSight) {{
+                // 💡【注釈】プレイヤーが敵の視界に入ったら、AIの怒りに応じて加速しながら激しく追いかけてくる！
+                c.angle = currentAngle;
+                let dynamicChaseSpeed = c.baseChaseSpeed * currentThreatMultiplier;
+                c.x += (dx / dist) * dynamicChaseSpeed;
+                c.y += (dy / dist) * dynamicChaseSpeed;
+                if (dist < 26) {{ gameOver(); }} // 💡【注釈】敵に触れたらゲームオーバー
+            }} else {{
+                // 💡【注釈】プレイヤーを見失っている時は、マップ内をランダムにのんびりパトロール（巡回）します。
+                let tdx = c.targetX - c.x, tdy = c.targetY - c.y;
+                let tDist = Math.sqrt(tdx*tdx + tdy*tdy);
+                if (tDist < 0.001) tDist = 0.001;
+
+                if (tDist < 20) {{
+                    c.targetX = 100 + Math.random()*800;
+                    c.targetY = 100 + Math.random()*800;
+                }} else {{
+                    let dynamicPatrolSpeed = c.baseSpeed * currentThreatMultiplier;
+                    c.x += (tdx / tDist) * dynamicPatrolSpeed;
+                    c.y += (tdy / tDist) * dynamicPatrolSpeed;
+                    let targetAngle = Math.atan2(tdy, tdx);
+                    let delta = normalizeAngle(targetAngle - c.angle);
+                    c.angle += delta * 0.04;
+                }}
+            }}
+        }});
+
+
+        // ⚠️【ENVIRONMENTAL ENTROPY LAYER: INFERENCE-DRIVEN SPACE DEFORMATION】
+        //
+        // 本処理は単なる視覚エフェクトではなく、
+        // LLMの推論不安定性（severity）を「環境エントロピー」として
+        // 空間座標系に投影するためのシミュレーション層である。
+        //
+        // つまりノイズはランダムではなく、
+        // "認知的矛盾の蓄積が物理空間に漏出した結果"として定義される。
+
+        bats.forEach(b => {{
+            // severity由来のエントロピーは局所空間の揺らぎとして表現される
+            let textNoiseX = (Math.random() - 0.5) * dynamicSeverityGlitchIntensity * 0.5;
+            let textNoiseY = (Math.random() - 0.5) * dynamicSeverityGlitchIntensity * 0.5;
+
+            // === Entropy-driven motion model ===
+            // 通常運動（velocity）に対して、認知崩壊ノイズが加算される構造
+            b.x += (b.vx * currentThreatMultiplier) + textNoiseX;
+            b.y += (b.vy * currentThreatMultiplier) + textNoiseY;
+
+            // 境界反射は「空間安定性の維持条件」
+            if (b.x < 50 || b.x > 950) b.vx *= -1;
+            if (b.y < 50 || b.y > 950) b.vy *= -1;
+        }});
+    }}
+
+
+    // ==============================================================================
+    // 6. GRAPHICS RENDERING ENGINE（描画：Canvasによる視覚的な世界の再構築）
+    // ==============================================================================
+    function draw() {{
+        ctx.clearRect(0, 0, cw, ch);
+        ctx.save();
+
+        // ⚠️【設計上のボトルネック：LLM→物理層の直接接続問題】
+        // 現在この関数は、LLM出力（confidence / severity）を"そのままゲーム物理量に変換"している。
+        // これはプロトタイプとしては成立するが、構造的には以下の問題を持つ：
+        //
+        // 1. LLM出力の揺らぎがそのまま難易度曲線に影響する（再現性の欠如）
+        // 2. ゲームバランスとAI推論ロジックが分離されていない（責務の混線）
+        // 3. 将来的にモデル変更＝ゲーム挙動崩壊リスク
+        //
+        // 💎【再設計方針：Decision Layerの導入】
+        // 本来は以下の3段階構造に分離すべき：
+        // LLM Output → Normalization Layer → Game Threat Engine
+        //
+        // ここでは簡略化のため直接変換しているが、実運用では
+        // 「AIの出力はあくまで観測データ」であり、物理法則は独立管理されるべき。
+
+        let glitchOffsetX = 0;
+        let glitchOffsetY = 0;
+        if (dynamicSeverityGlitchIntensity > 0 && Math.random() < 0.3) {{
+            glitchOffsetX = (Math.random() - 0.5) * dynamicSeverityGlitchIntensity;
+            glitchOffsetY = (Math.random() - 0.5) * dynamicSeverityGlitchIntensity;
+        }}
+
+        // 💡【注釈】プレイヤーが画面の中心に常に映るよう、カメラの座標を追従させる処理。
+        ctx.translate(cw/2 - player.x + glitchOffsetX, ch/2 - player.y + glitchOffsetY);
+
+        // 💡【注釈】背景にうっすらと流れるサイバーな緑色のグリッド（格子）線を引いています。
+        ctx.strokeStyle = "rgba(0, 40, 0, 0.3)"; ctx.lineWidth = 1;
+        for(let i=0; i<=1000; i+=100) {{
+            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, 1000); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(1000, i); ctx.stroke();
+        }}
+
+        // 💡【注釈】マップの限界を示す、アリーナの外壁。
+        ctx.strokeStyle = "rgba(0, 200, 0, 0.4)"; ctx.lineWidth = 2; ctx.strokeRect(40, 40, 920, 920);
+
+        // 💡【注釈】3つのエリア（ノード 📍）の文字を描画。クリアすると透明度を下げて薄くします。
+        LOCS.forEach(loc => {{
+            ctx.save();
+            if (auditStates[loc.id].cleared) ctx.globalAlpha = 0.15;
+            ctx.font = "28px Arial"; ctx.fillText(loc.icon, loc.x-14, loc.y+10);
+            ctx.restore();
+        }});
+
+        // 💡【注釈】コレクター（敵 👤）の姿と、彼らの緑色に伸びる「索敵レーザー（視界の扇形）」をCanvasに描く処理。
+        collectors.forEach(c => {{
+            ctx.save();
+            ctx.beginPath(); ctx.moveTo(c.x, c.y);
+            let dynamicViewDist = c.viewDist * (currentThreatMultiplier * 0.9);
+            let dynamicFOV = Math.min(1.2, c.fov + dynamicFOVBonus);
+            ctx.arc(c.x, c.y, dynamicViewDist, c.angle - dynamicFOV, c.angle + dynamicFOV);
+            ctx.closePath();
+            ctx.fillStyle = "rgba(0, 255, 0, 0.03)"; ctx.fill();
+            ctx.strokeStyle = "rgba(255, 0, 0, 0.25)"; ctx.stroke();
+            ctx.font = "26px serif"; ctx.fillText("👤", c.x-14, c.y+10);
+            ctx.restore();
+        }});
+
+        // 💡【注釈】環境ノイズ（UFO 🛸）と、プレイヤー（ロボット 🤖）を画面に描画。
+        ctx.font = "14px serif"; ctx.fillStyle = "#383";
+        bats.forEach(b => {{ ctx.fillText("🛸", b.x, b.y); }});
+
+        ctx.font = "28px serif"; ctx.fillStyle = "white"; ctx.fillText("🤖", player.x-14, player.y+10);
+        ctx.restore();
+
+        // ⚠️【設計上の特徴：認知状態による視界制限モデル】
+        // このセクションでは、LLM由来の confidence / uncertainty を直接利用し、
+        // プレイヤーの"視界そのもの"を動的に制御している。
+        //
+        // つまりこれは単なる暗闇表現ではなく、
+        // 「AIの確信度＝観測可能領域の収縮」という認知モデルの視覚化である。
+        //
+        // ⚠️【設計リスク】
+        // 本処理はレンダリング層（Canvas）に対して
+        // ロジック層（AI出力）が直接影響しているため、
+        // UIとSimulationの境界が曖昧になる。
+        //
+        // 💎【再設計方針】
+        // 本来は ViewState（視界モデル）を独立させ、
+        // confidence → visibility係数への変換は中間層（Perception Layer）で行うべき。
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'destination-in';
+
+        // 【修正結合】プレイヤーの視界制限ロジックを確定適用
+        let playerViewRadius = Math.max(90, 170 - dynamicViewRadiusDebuff);
+
+        let grad = ctx.createRadialGradient(cw/2, ch/2, playerViewRadius, cw/2, ch/2, 360);
+        grad.addColorStop(0, 'rgba(0,0,0,1)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad; ctx.fillRect(0,0,cw,ch);
+        ctx.restore();
+    }}
+
+
+    // ==============================================================================
+    // 7. AUDIT INTERFACE & FINAL VERIFICATION（監査インターフェースと最終ジャッジ）
+    // ==============================================================================
+    function openFacility(loc) {{
+        activeUI = loc.id;
+        keys = {{}};
+
+        document.getElementById('fac-name').innerText = loc.name;
+        document.getElementById('fac-desc').innerText = loc.desc;
+
+        const grid = document.getElementById('audit-grid-container');
+        grid.innerHTML = "";
+
+        // 💡【注釈】Gemmaが生成した「正常な推論 A」と「嘘（幻覚）の推理 B」の2枚のカードを画面に並べる。
+        grid.appendChild(createReportCard(loc.id, "A", loc.reportA));
+        grid.appendChild(createReportCard(loc.id, "B", loc.reportB));
+
+        document.getElementById("facility-ui").style.display = "flex";
+    }}
+
+    function createReportCard(sectorId, label, signalData) {{
+        let card = document.createElement("div");
+        card.id = "card-" + sectorId + "-" + label;
+        card.className = "report-card";
+        if (auditStates[sectorId].fakeMarked === label) {{
+            card.classList.add("marked-fake");
+        }}
+
+        card.innerHTML = `
+            <div>
+                <div class="card-header">📋 AUDIT INFERENCE LOG [${{label}}] (Suspicion: ${{signalData.suspicion}} / Confidence: ${{signalData.confidence}} / Fallacy Severity: ${{signalData.severity}})</div>
+                <div class="card-body">${{signalData.report}}</div>
+                <div class="card-contradiction"><b>⚠️ IDENTIFIED LOGICAL DISCREPANCY:</b><br>${{signalData.contradiction}}</div>
+            </div>
+            <div style="margin-top:15px;">
+                <button class="btn ${{auditStates[sectorId].fakeMarked === label ? 'purged-active' : ''}}"
+                        id="btn-${{sectorId}}-${{label}}"
+                        onclick="markAsFake('${{sectorId}}', '${{label}}')">
+                    ${{auditStates[sectorId].fakeMarked === label ? '🔴 ISOLATION TARGET ACTIVE' : '❌ FLAG THIS INFERENCE AS HALLUCINATION'}}
+                </button>
+            </div>
+        `;
+        return card;
+    }}
+
+    // 💡【注釈】プレイヤーが「こっちがAIの嘘（幻覚）だ！」と選んでボタンを押した時の処理。
+    window.markAsFake = function(sectorId, label) {{
+        auditStates[sectorId].fakeMarked = label;
+
+        let otherLabel = (label === "A") ? "B" : "A";
+        document.getElementById("card-" + sectorId + "-" + label).classList.add("marked-fake");
+        document.getElementById("btn-" + sectorId + "-" + label).classList.add("purged-active");
+        document.getElementById("btn-" + sectorId + "-" + label).innerText = "🔴 ISOLATION TARGET ACTIVE";
+
+        document.getElementById("card-" + sectorId + "-" + otherLabel).classList.remove("marked-fake");
+        document.getElementById("btn-" + sectorId + "-" + otherLabel).classList.remove("purged-active");
+        document.getElementById("btn-" + sectorId + "-" + otherLabel).innerText = "❌ FLAG THIS INFERENCE AS HALLUCINATION";
+
+        document.getElementById('log-content').innerHTML += "> Telemetry Updated: Isolated sector [" + sectorId + "] candidate [" + label + "]. Recalculating environmental coherence vectors.<br>";
+    }}
+
+    function closeUI() {{
+        let currentSector = activeUI;
+        // 💡【注釈】選んだあとに画面を閉じると、そのエリアのバグが「隔離（クリア）」された扱いになります。
+        if (auditStates[currentSector].fakeMarked !== null) {{
+            auditStates[currentSector].cleared = true;
+            document.getElementById('log-content').innerHTML += "<span style='color:gold;'>> Mitigation Success: Isolated anomaly inside [" + currentSector + "] sector node.</span><br>";
+        }} else {{
+            document.getElementById('log-content').innerHTML += "<span style='color:#aaa;'>> System Warning: Evaluation routine deferred. Structural stability un-neutralized.</span><br>";
+        }}
+
+        activeUI = null;
+        keys = {{}};
+        player.y += 55; // 💡【注釈】画面を閉じた瞬間にノードに再接触しないよう、少し下へ押し出す。
+
+        // 💡【注釈】嘘を暴いたので、世界の崩壊倍率（難易度）を再計算して元に戻します（平和になる！）。
+        recalculateWorldThreat();
+
+        document.getElementById("facility-ui").style.display = "none";
+
+        window.focus();
+        canvas.focus();
+
+        // 💡【注釈】3つのエリアすべての嘘を暴ききったら、いよいよ最終脱出画面（goToBattle）へ！
+        let allCleared = Object.values(auditStates).every(s => s.cleared);
+        if (allCleared) {{
+            goToBattle();
+        }}
+    }}
+
+    function gameOver() {{
+        isGameRunning = false;
+        if(gameTimerId) clearInterval(gameTimerId);
+        document.getElementById("gameover-overlay").style.display = "flex";
+    }}
+
+    function goToBattle() {{
+        activeUI = "battle";
+        isGameRunning = false;
+        if(gameTimerId) {{ clearInterval(gameTimerId); gameTimerId = null; }}
+        document.getElementById("top-ui").style.display = "none";
+        document.getElementById("battle-ui").style.display = "flex";
+    }}
+
+    // 💡【注釈】脱出ゲートを選んだ瞬間、すべてのエリアで「正しく嘘のログ（B）」を見抜けていたか最終ジャッジを行います。
+    window.executeFinalCheck = function(targetSector) {{
+        let isBioCorrect = (auditStates["BIO"].fakeMarked === "B");
+        let isMecCorrect = (auditStates["MEC"].fakeMarked === "B");
+        let isCybCorrect = (auditStates["CYB"].fakeMarked === "B");
+
+        // 💎【堅牢化のヒント】
+        // ここでの判定は、すべてのエリアで「Bが選ばれていること」が勝利条件になっています。
+        // プロトタイプとしてはこれで完璧ですが、より大きなゲームにする場合、ここも `TelemetryState` のような
+        // 独立した「監査ログ・データ層」に答え合わせを任せる設計にすると、ステージが100個に増えても破綻しなくなります。
+        if (isBioCorrect && isMecCorrect && isCybCorrect) {{
+            alert("🏆 [SIMULATION SUCCESSFUL]\nAll hallucinations (Flawed Deductions B) successfully purged.\nSpatial coordinate systems stabilized. Secure transit achieved through " + targetSector + " exit corridor.");
+        }} else {{
+            alert("⚠️ [CRITICAL ARCHITECTURAL EXPLOSION]\nHallucinated parameters successfully locked into core security logic arrays.\nLogical contamination triggered complete geometric collapse. Core captured.");
+        }}
+        location.reload();
+    }}
+
+    // 💡【注釈】キーボードの操作を受け付けるためのイベントリスナー。
+    window.addEventListener("keydown", e => {{
+        if (!activeUI) {{
+            keys[e.code] = true;
+            if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].indexOf(e.code) > -1) {{
+                e.preventDefault();
+            }}
+        }}
+    }});
+    window.addEventListener("keyup", e => {{ keys[e.code] = false; }});
+    window.addEventListener('resize', () => {{ cw = canvas.width = window.innerWidth; ch = canvas.height = window.innerHeight; }});
+</script>
+
+<style>
+@keyframes blink {{
+    0%   {{ opacity: 0.3; }}
+    100% {{ opacity: 1.0; }}
+}}
+</style>
+</body>
+</html>
+"""
+
+# ==============================================================================
+# 8. SYSTEM SYNC ENGINE（ゲームの画面出力）
+# ==============================================================================
+# 💡【注釈】最後に、Python（Streamlit）から完成した全HTML/JSをブラウザに流し込んでゲームを実行します。
+components.html(game_html, height=830)
