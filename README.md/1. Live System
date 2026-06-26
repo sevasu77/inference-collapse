@@ -17,9 +17,7 @@ flowchart TD
 
     UI["Streamlit UI"]
 
-    Canvas["HTML5 Canvas"]
-
-    Python["Python Backend"]
+    Backend["Python Backend"]
 
     LLM["Gemma 4"]
 
@@ -27,22 +25,21 @@ flowchart TD
 
     Engine["Game Engine"]
 
+    Canvas["HTML5 Canvas"]
+
     User --> UI
+    UI --> Backend
 
-    UI --> Python
+    Backend --> LLM
+    LLM --> Backend
 
-    Python --> LLM
-
-    LLM --> Python
-
-    Python --> State
-
+    Backend --> State
     State --> Engine
-
     Engine --> Canvas
-
     Canvas --> User
 ```
+
+現在は **Python Backend** がシステム全体のハブとして機能しており、LLM・状態管理・ゲームエンジンを仲介しています。
 
 ---
 
@@ -50,153 +47,183 @@ flowchart TD
 
 ## UI
 
-**Technology**
+### Technology
 
 * Streamlit
 * HTML Components
 
-**Responsibilities**
+### Responsibilities
 
-* Evidence input
-* Audit interface
-* Status display
-* Game launch
+* Evidence Input
+* Audit Interface
+* Status Display
+* Game Launch
+
+---
+
+## Python Backend
+
+### Responsibilities
+
+* LLM 呼び出し
+* 状態更新
+* ゲームエンジン制御
+* UI との連携
+
+> 現在は API Layer を兼ねています。将来的には FastAPI へ分離予定です。
 
 ---
 
 ## LLM
 
-**Model**
+### Model
 
 * Gemma 4
 
-**Responsibilities**
+### Responsibilities
 
-* Analyze evidence
-* Detect contradictions
-* Calculate confidence
-* Estimate threat level
+* Analyze Evidence
+* Detect Contradictions
+* Calculate Confidence
+* Estimate Threat Level
 
 ---
 
 ## Runtime State
 
-現在は Python のメモリ上で状態を保持している。
+現在は Python メモリ上で状態を保持しています。
 
-主な管理対象：
+### Current State
 
 * Audit Results
 * Node Truths
 * AI Reasoning
 * Threat Level
 
-今後は以下のように分割予定。
+### Planned Structure
 
-```text
-State
-├── WorldState
-├── AIState
-├── EngineState
-└── MetaState
+```mermaid
+flowchart TD
+
+    State["Runtime State"]
+
+    State --> World["WorldState"]
+    State --> AI["AIState"]
+    State --> Engine["EngineState"]
+    State --> Meta["MetaState"]
 ```
 
 ---
 
 ## Game Engine
 
-現在担当している機能：
+### Responsibilities
 
-* Player movement
+* Player Movement
 * Enemy AI
-* Field of View (FOV)
-* Collision
+* Collision Detection
 * Timer
-* Glitch effects
+* Vision System
+* Glitch Effects
 
-Threat Level を参照してゲーム世界を更新する。
+Threat Level を参照しながらゲーム世界を更新します。
 
 ---
 
 ## Rendering
 
-Canvas によりリアルタイム描画を行う。
+### Technology
 
-表示内容：
+* HTML5 Canvas
+* JavaScript
 
-* Player
-* Enemies
-* Vision
-* Effects
+### Responsibilities
+
+* Player Rendering
+* Enemy Rendering
 * HUD
+* Visual Effects
 
 ---
 
-# Current Data Flow
+# Current Runtime Flow
 
 ```mermaid
 flowchart LR
 
-A[Evidence]
---> B[Gemma 4]
+    Evidence["Evidence"]
 
-B
---> C[Audit Result]
+    LLM["Gemma 4"]
 
-C
---> D[Runtime State]
+    Result["Inference Result"]
 
-D
---> E[Threat Calculation]
+    State["Runtime State"]
 
-E
---> F[Game Engine]
+    Threat["Threat Calculation"]
 
-F
---> G[Canvas]
+    Engine["Game Engine"]
+
+    Canvas["Canvas"]
+
+    Evidence --> LLM
+    LLM --> Result
+    Result --> State
+    State --> Threat
+    Threat --> Engine
+    Engine --> Canvas
 ```
 
 ---
 
 # Current Limitations
 
-現在の実装には以下の課題がある。
+現在のプロトタイプには以下の課題があります。
 
 * Streamlit とゲームロジックが密結合
-* State の責務が集中し始めている
+* Runtime State の責務が集中している
 * API Layer が未分離
 * Decision Layer が未実装
-* FastAPI 化前提の構造になっていない
+* FastAPI 化を前提とした構造になっていない
 
 ---
 
 # Planned Refactoring
 
-今後は以下の順で改善を行う。
+```mermaid
+flowchart TD
 
-1. API Layer の分離
-2. State の分割
-3. Decision Layer の追加
-4. Threat Engine の独立
-5. FastAPI 化
-6. WebSocket によるリアルタイム同期
+    A["Current Prototype"]
 
----
+    A --> B["Separate API Layer"]
 
-# Relation to Other Documents
+    B --> C["Split Runtime State"]
 
-| Document          | Purpose   |
-| ----------------- | --------- |
-| `architecture.md` | 理想アーキテクチャ |
-| `flow.md`         | 処理フロー     |
-| `docs/adr/`       | 設計判断の記録   |
-| `README.md`       | プロジェクト概要  |
+    C --> D["Introduce Decision Layer"]
+
+    D --> E["Independent Threat Engine"]
+
+    E --> F["FastAPI Backend"]
+
+    F --> G["WebSocket Synchronization"]
+```
 
 ---
 
-## Status
+# Related Documents
 
-**Current Version**
+| Document          | Purpose                       |
+| ----------------- | ----------------------------- |
+| `README.md`       | Project Overview              |
+| `architecture.md` | Target Architecture           |
+| `flow.md`         | Runtime Data Flow             |
+| `docs/adr/`       | Architecture Decision Records |
 
-Prototype Phase
+---
 
-設計を整理しながら、実装を段階的に理想アーキテクチャへ移行中。
+# Status
+
+**Current Phase**
+
+Prototype
+
+現在は **「動くプロトタイプから理想アーキテクチャへ段階的に移行するフェーズ」** にあります。
