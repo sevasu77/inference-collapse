@@ -5,7 +5,7 @@ from dataclasses import dataclass
 class NormalizedInference:
     """Decision Layerによって正規化され、不変となった型安全な推論結果モデル"""
     report: str
-    confidence_score: float
+    confidence: float
     suspicion: str
     contradiction: str
-    severity_score: int
+    severity: int
