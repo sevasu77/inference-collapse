@@ -1,30 +1,23 @@
 # engine/threat.py
-from state import CognitiveState
-from state import WorldState
+from state import GameState
+from models.physics import PhysicsParameters
 
 class ThreatEngine:
     """
-    AI Cognitive -> Physics Parameter Converter
+    Cognitive to Physics Generator
     
-    【再設計の核心】
-    CognitiveState（AIが信じている認知）と WorldState（未解決のノード）を読み込み、
-    ゲーム世界を直接駆動するための純粋な『物理パラメータ（Physics）』へ変換・翻訳する。
+    GameStateの認知的不確実性を読み解き、
+    純粋な物理パラメータ（PhysicsParameters）を動的に『生成』する。
     """
-    def __init__(self, cognitive_state: CognitiveState, world_state: WorldState):
-        self.cognitive = cognitive_state
-        self.world = world_state
+    def __init__(self, game_state: GameState):
+        self.game_state = game_state
 
-    def calculate_physics_parameters(self) -> dict:
-        """
-        AIの認知的不確実性を抽出し、ゲーム世界を支配する物理数値へと変換する。
-        
-        Returns:
-            dict: Physicsパラメータ（Gemmaへの依存性が完全に消去された純粋な数値）
-        """
-        # TODO: 未クリアノードのconfidenceやseverityを抽出し、以下のPhysicsにマッピング
-        return {
-            "enemy_speed": 1.5,       # 敵の移動速度の乗数
-            "enemy_fov": 1.2,         # 敵の視野角（ラジアン）
-            "visibility": 0.7,        # プレイヤーの視界の明るさ・半径（1.0が最大）
-            "glitch_intensity": 3.5   # 空間座標のガタツキ（グリッチ）のピクセル強度
-        }
+    def generate_physics(self) -> PhysicsParameters:
+        """AIの認知状態から、ゲーム世界を支配する不変の物理定数を生成する"""
+        # TODO: game_state.cognitive と game_state.world から数値を集計するロジック
+        return PhysicsParameters(
+            enemy_speed=1.45,
+            enemy_fov=1.15,
+            visibility=0.75,
+            glitch_intensity=3.0
+        )
