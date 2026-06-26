@@ -30,3 +30,12 @@ LLMとゲームエンジンを分離した理由
       confidence
       severity
       report
+
+Decision
+
+LLMは「推論だけ」を担当する。
+
+Why
+AIの責務を限定する
+ゲームロジックとの依存を切る
+他モデルへ交換可能にする
