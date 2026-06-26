@@ -55,13 +55,33 @@ contradiction (矛盾)
 
 該当コード： auditStates, node_truths, gemma_reasonings
 
-データ構造：
+ただし、危険ポイント　→　state が肥大化すると「神オブジェクト化」する
+
+今の設計だと state がこうなりやすい：
+
+BIO / MEC / CYB
+truth
+hallucination
+threat
+history
+audit
+
+→ そのうち全部 state に入る
+
+📉 結果：
+
+デバッグ不能
+依存地獄
+
+解決の方向性
 
 State
  ├── WorldState（事実）
  ├── AIState（推論結果）
  ├── EngineState（物理）
  └── MetaState（ログ・履歴）
+
+👉 「何の状態か」で分ける
 
 🎮 ③ Game Engine（物理世界）
 役割： 「動き・敵・視界・時間」 ➔ 👉「ゲームの物理エンジン」
@@ -103,6 +123,17 @@ confidence → speed / hallucination → FOV / severity → glitch
 
 これがあるから、このプロジェクトはただのゲームではなく
 「AIの認知が世界を歪める実験装置」になっている
+
+ただし、LLM出力が直接ゲームに影響しすぎる問題
+
+今の設計：
+
+LLM → state → engine（かなり直結）
+
+これは面白いけど危険で、
+
+ノイズ1つで世界崩壊
+再現性が落ちる
 
 🖥️ ⑤ UI層（見た目）
 役割： 「プレイヤーが触る画面」 ➔ 👉「操作パネル」
