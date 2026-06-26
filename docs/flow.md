@@ -57,12 +57,12 @@ contradiction (矛盾)
 
 データ構造：
 
-Python
-state = {
-    "BIO": {"cleared": bool, "fakeMarked": bool},
-    "MEC": {"cleared": bool, "fakeMarked": bool},
-    "CYB": {"cleared": bool, "fakeMarked": bool}
-}
+State
+ ├── WorldState（事実）
+ ├── AIState（推論結果）
+ ├── EngineState（物理）
+ └── MetaState（ログ・履歴）
+
 🎮 ③ Game Engine（物理世界）
 役割： 「動き・敵・視界・時間」 ➔ 👉「ゲームの物理エンジン」
 
@@ -82,6 +82,27 @@ confidence (確信度) ⬆️ ➔ 敵の移動スピードUP
 severity (危険度) ⬆️ ➔ 画面にグリッチエフェクト発生
 
 hallucination (幻覚度) ⬆️ ➔ プレイヤーの視界（FOV）縮小
+
+Threat Systemの発想が一番“核”
+
+ここがこの設計の差別化ポイント：
+
+confidence → speed / hallucination → FOV / severity → glitch
+
+つまり：
+
+👉 “AIの確信度が物理法則になる”
+
+普通のゲーム：
+
+難易度 = 固定パラメータ
+
+この設計：
+
+難易度 = AIの認知状態
+
+これがあるから、このプロジェクトはただのゲームではなく
+「AIの認知が世界を歪める実験装置」になっている
 
 🖥️ ⑤ UI層（見た目）
 役割： 「プレイヤーが触る画面」 ➔ 👉「操作パネル」
@@ -129,6 +150,8 @@ Plaintext
               │
               ▼
        [Frontend / Canvas] ─── 🎨 グリッチ・描画反映
+
+
 🎯 現状の課題と目指す姿
 ❗ 現在の結合度（密結合）
 Plaintext
