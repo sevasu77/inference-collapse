@@ -1,147 +1,308 @@
-# Inference Collapse
-# アーキテクチャ仕様書
+# Architecture
 
-## 1. 概要
+## Overview
 
-## 2. システムコンセプト
+Inference Collapse は、「LLM の認知状態がゲーム世界へ影響を与える」ことを目的とした実験的シミュレーションシステムです。
 
-## 3. 現在の動作構成（Live System）
+一般的な AI アプリケーションでは、
 
-## 4. 現在の実行フロー
+```text
+LLM
+   ↓
+Text Response
+   ↓
+User
+```
 
-## 5. 現状の制約
+という流れで推論結果をテキストとして返します。
 
-## 6. 目標アーキテクチャ
+一方、本プロジェクトでは、
 
-## 7. コンポーネント責務
+```text
+LLM
+      ↓
+Cognitive State
+      ↓
+Physics Parameters
+      ↓
+Simulation
+      ↓
+Player Experience
+```
 
-## 8. データフロー
+という一方向のパイプラインを採用しています。
 
-## 9. 設計原則
+LLM は文章生成器ではなく、
 
-## 10. 設計目標
+**「認知状態（Cognitive State）を生成するコンポーネント」**
 
-## 11. 関連ドキュメント
+として扱われます。
 
-そして、Future Extensions は削除します。
+生成された認知状態は、そのままゲームロジックへ渡されるのではなく、物理パラメータへ変換されることでゲーム世界へ影響を与えます。
 
-理由は、
+---
 
-05_future_improvements.md
+# System Architecture
 
-が存在するからです。
+現在のシステムは、以下の責務ごとにコンポーネントを分離することを目標として設計されています。
 
-同じ内容を二か所に書くと、
-後で100%ズレます。
+```text
+Inference Collapse
 
-私ならここも少し変えます
+├── UI Layer
+│      ├── Streamlit
+│      ├── HTML5 Canvas
+│      └── Components
+│
+├── AI Layer
+│      ├── Gemma Client
+│      └── Prompts
+│
+├── Decision Layer
+│      ├── Inference Normalizer
+│      └── Validator
+│
+├── Game State
+│      ├── Environment State
+│      ├── Cognitive State
+│      ├── Runtime State
+│      └── Telemetry State
+│
+├── Simulation Engine
+│      ├── Threat Engine
+│      └── Simulation Engine
+│
+└── Data Models
+       ├── NormalizedInference
+       └── PhysicsParameters
+```
 
-今は
+各コンポーネントは責務ごとに独立しており、一方向のデータフローによって接続されます。
 
-2. Current Runtime
+---
 
-となっていますが、
+# Current Runtime
 
-これは
+現在の実装は、コンテスト向けプロトタイプ（Phase 1）として構築されています。
 
-## 現在の実装（Live System）
+使用技術は以下の通りです。
 
-の方が自然です。
+* UI：Streamlit + HTML5 Canvas
+* Backend：Python
+* AI：Gemma 4
+* Rendering：JavaScript Canvas
 
-Current Limitations
+現時点では Python Backend が各コンポーネントの仲介役となり、同期的に処理を行っています。
 
-↓
+---
 
-現在の構造と課題
-Target Architecture
+# Current Runtime Flow
 
-↓
+現在のプロトタイプでは、以下の順序でデータが処理されます。
 
-目標アーキテクチャ
-Design Goals
+```text
+Streamlit UI
+        │
+        ▼
+Python Backend
+        │
+        ▼
+Gemma 4 API
+        │
+        ▼
+Runtime State
+        │
+        ▼
+Game Engine
+        │
+        ▼
+HTML5 Canvas
+```
 
-↓
+Gemma の推論結果は Runtime State に保存され、その状態をゲームエンジンが参照してゲーム世界を更新します。
 
-この設計で実現したいこと
+---
 
-この方が読み手が頭に入りやすいです。
+# Current Limitations
 
-あと一つだけ追加したい
+現在のプロトタイプには、以下の課題があります。
 
-冒頭にこれを入れます。
+* Streamlit とゲームロジックが密結合している
+* Runtime State に責務が集中している
+* Decision Layer が未実装である
+* LLM の生データを直接利用している
+* API 層が分離されていない
 
-## このドキュメントについて
+これらは、今後のリファクタリング対象です。
 
-このドキュメントでは、Inference Collapse の現在の実装と、
-目指しているアーキテクチャをまとめて説明します。
+---
 
-設計上の考え方や意思決定の理由については
-`02_design_decisions.md` を参照してください。
+# Component Responsibilities
 
-また、プロトタイプから現在の構造へ至るまでの経緯は
-`03_history.md` にまとめています。
+## UI Layer
 
-これがあるだけで、
+**責務**
 
-「ここは設計図なんだ」
+* ユーザー入力
+* HUD の表示
+* Canvas 描画
 
-ということが一瞬で分かります。
+**担当しないもの**
 
-逆に削除していい部分
+* AI 推論
+* 物理演算
+* 状態管理
 
-ここ。
+---
 
-## Future Extensions
+## AI Layer
 
-FastAPI
+**責務**
 
-Redis
+* Gemma API 通信
+* プロンプト管理
+* 推論結果の生成
 
-Docker
+AI はゲーム世界を書き換えません。
 
-Kubernetes
+認知状態を生成することだけを担当します。
 
-・・・
+---
 
-これは完全に
+## Decision Layer
 
-05_future_improvements.md
+**責務**
 
-へ移します。
+LLM の生データを検証し、安全なデータモデルへ変換します。
 
-最終構成はこれが一番きれいです
-README.md
-    ↓
-作品紹介
+役割は、
 
-01_architecture.md
-    ↓
-現在の構造
-理想構造
-責務
-データフロー
-設計原則
+**AI の気まぐれからゲームエンジンを守る防波堤**
 
-02_design_decisions.md
-    ↓
-なぜこう設計したか
+です。
 
-03_history.md
-    ↓
-どう進化したか
+---
 
-04_lessons_learned.md
-    ↓
-開発を通じて学んだこと
+## Game State
 
-05_future_improvements.md
-    ↓
-これから何を作るか
+**責務**
 
-adr/
-    ↓
-その瞬間その瞬間の意思決定ログ
+ゲーム世界の現在の状態を保持します。
 
-technical_specs/
-    ↓
-内部仕様書
+* Environment State
+* Cognitive State
+* Runtime State
+* Telemetry State
+
+Game State はデータのみを保持し、ゲームロジックは持ちません。
+
+---
+
+## Threat Engine
+
+本プロジェクトの中核となるコンポーネントです。
+
+AI の認知状態をゲーム世界の物理法則へ変換します。
+
+| Cognitive State | Physical Effect       |
+| --------------- | --------------------- |
+| Confidence      | Enemy Speed           |
+| Severity        | Spatial Distortion    |
+| Contradiction   | Perception Distortion |
+
+AI はゲームを直接制御せず、認知状態だけを提供します。
+
+Threat Engine が認知と物理世界を接続します。
+
+---
+
+## Simulation Engine
+
+**責務**
+
+Threat Engine が生成した物理パラメータを受け取り、
+
+* プレイヤー
+* 敵 AI
+* 衝突判定
+* タイマー
+* エフェクト
+
+などを更新します。
+
+Simulation Engine は AI の存在を知りません。
+
+---
+
+# Data Flow
+
+理想的なデータフローは、一方向のみです。
+
+```text
+AI Layer
+      │
+      ▼
+Decision Layer
+      │
+      ▼
+NormalizedInference
+      │
+      ▼
+Game State
+      │
+      ▼
+Threat Engine
+      │
+      ▼
+PhysicsParameters
+      │
+      ▼
+Simulation Engine
+      │
+      ▼
+UI Layer
+```
+
+各レイヤーは上流の情報のみを受け取り、下流へ渡します。
+
+逆方向の依存は持ちません。
+
+---
+
+# Design Principles
+
+本プロジェクトは、以下の設計原則に基づいています。
+
+## Prototype First
+
+まず動作するプロトタイプを構築し、コアコンセプトの実現可能性を検証する。
+
+---
+
+## Post-Hoc Architecture
+
+動作するプロトタイプから責務を抽出し、段階的にアーキテクチャへ発展させる。
+
+---
+
+## Separation of Responsibilities
+
+AI・状態管理・シミュレーション・UI を独立したコンポーネントとして設計する。
+
+---
+
+## Inference-to-Physics Mapping
+
+LLM の推論結果を直接ゲームへ反映するのではなく、物理パラメータへ変換することで AI とゲームロジックを疎結合に保つ。
+
+---
+
+# Design Goals
+
+本アーキテクチャが目指す最終的な目標は次のとおりです。
+
+* AI・状態管理・シミュレーション・UI の責務分離
+* LLM を容易に差し替えられる構造
+* バックエンドの独立
+* 保守性・拡張性・再利用性の向上
+* AI の認知状態を安全かつ制御可能な形で物理世界へ変換するアーキテクチャ
